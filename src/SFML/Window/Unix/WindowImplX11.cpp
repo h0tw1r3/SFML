@@ -295,7 +295,7 @@ m_useSizeHints(false)
     }
     else
     {
-        switchToFullscreen(mode);
+        switchToFullscreen();
     }
 
     // Set the window's WM class (this can be used by window managers)
@@ -305,19 +305,6 @@ m_useSizeHints(false)
 
     // Do some common initializations
     initialize();
-
-    // In fullscreen mode, we must grab keyboard and mouse inputs
-    if (fullscreen)
-    {
-        int grabResult = XGrabPointer(m_display, m_window, True, 0, GrabModeAsync, GrabModeAsync,
-                                      m_window, None, CurrentTime);
-        if (grabResult != GrabSuccess)
-            sf::err() << "Grabbing the mouse failed (" << grabResult << ")." << std::endl;
-
-        grabResult = XGrabKeyboard(m_display, m_window, True, GrabModeAsync, GrabModeAsync, CurrentTime);
-        if (grabResult != GrabSuccess)
-            sf::err() << "Grabbing the keyboard failed (" << grabResult << ")." << std::endl;
-    }
 }
 
 
@@ -360,6 +347,38 @@ WindowHandle WindowImplX11::getSystemHandle() const
     return m_window;
 }
 
+////////////////////////////////////////////////////////////
+void WindowImplX11::grabPointer()
+{
+    xcb_grab_pointer_cookie_t grabCookie = xcb_grab_pointer(
+        m_connection, 1, m_window,
+        XCB_EVENT_MASK_BUTTON_PRESS | XCB_EVENT_MASK_BUTTON_RELEASE | XCB_EVENT_MASK_POINTER_MOTION,
+        XCB_GRAB_MODE_ASYNC, XCB_GRAB_MODE_ASYNC,
+        m_window, XCB_NONE, XCB_CURRENT_TIME);
+
+    xcb_generic_error_t* grabError = NULL;
+    xcb_grab_pointer_reply_t* grabReply = xcb_grab_pointer_reply(m_connection, grabCookie, &grabError);
+
+    if (grabError)
+    {
+        char errorText[256];
+        XGetErrorText(m_display, grabError->error_code, errorText, 256);
+
+        sf::err() << "Grabbing the pointer failed." << std::endl
+                  << "  Error code: "
+                  << static_cast<int>(grabError->error_code) << std::endl
+                  << "  Error text: " << errorText << std::endl;
+    }
+    else if (grabReply && grabReply->status != 0)
+    {
+        sf::err() << "Grabbing the pointer failed." << std::endl
+                  << "  Status: "
+                  << static_cast<int>(grabReply->status) << std::endl;
+    }
+
+    free(grabError);
+    free(grabReply);
+}
 
 ////////////////////////////////////////////////////////////
 void WindowImplX11::processEvents()
@@ -671,34 +690,65 @@ bool WindowImplX11::hasFocus() const
 
 
 ////////////////////////////////////////////////////////////
-void WindowImplX11::switchToFullscreen(const VideoMode& mode)
+void WindowImplX11::switchToFullscreen()
 {
     static const std::string netWmState = "_NET_WM_STATE";
     static const std::string netWmStateFullscreen = "_NET_WM_STATE_FULLSCREEN";
+    static const std::string netWmStateBypassCompositor = "_NET_WM_BYPASS_COMPOSITOR";
 
+    // Create atom for _NET_WM_STATE.
     xcb_intern_atom_cookie_t stateCookie = xcb_intern_atom(m_connection,
                                                            0,
                                                            netWmState.size(),
                                                            netWmState.c_str());
     xcb_intern_atom_reply_t* stateReply = xcb_intern_atom_reply(m_connection, stateCookie, 0);
 
+    // Create atom for _NET_WM_STATE_FULLSCREEN.
     xcb_intern_atom_cookie_t fullscreenCookie = xcb_intern_atom(m_connection,
                                                                 0,
                                                                 netWmStateFullscreen.size(),
                                                                 netWmStateFullscreen.c_str());
     xcb_intern_atom_reply_t* fullscreenReply = xcb_intern_atom_reply(m_connection, fullscreenCookie, 0);
 
-    xcb_void_cookie_t changeCookie = xcb_change_property_checked(m_connection, XCB_PROP_MODE_REPLACE,
+    // Set fullscreen property.
+    xcb_void_cookie_t changeCookie = xcb_change_property_checked(m_connection, XCB_PROP_MODE_APPEND,
                                                                  m_window,
                                                                  stateReply->atom,
                                                                  XCB_ATOM_ATOM, 32, 1,
                                                                  &fullscreenReply->atom);
 
     xcb_generic_error_t* error = xcb_request_check(m_connection, changeCookie);
+
     if (error)
     {
-        sf::err() << "xcb_change_property failed, setting fullscreen not possible." << std::endl;
+        sf::err() << "Setting fullscreen failed." << std::endl;
         free(error);
+    }
+    else
+    {
+        // Create atom for _NET_WM_BYPASS_COMPOSITOR.
+        xcb_intern_atom_cookie_t compCookie = xcb_intern_atom(m_connection,
+                                                                    0,
+                                                                    netWmStateFullscreen.size(),
+                                                                    netWmStateFullscreen.c_str());
+        xcb_intern_atom_reply_t* compReply = xcb_intern_atom_reply(m_connection, compCookie, 0);
+
+        // Disable compositor.
+        changeCookie = xcb_change_property_checked(m_connection, XCB_PROP_MODE_APPEND,
+                                                   m_window,
+                                                   stateReply->atom,
+                                                   XCB_ATOM_ATOM, 32, 1,
+                                                   &compReply->atom);
+
+        xcb_generic_error_t* error = xcb_request_check(m_connection, changeCookie);
+
+        if (error)
+        {
+            sf::err() << "xcb_change_property failed, setting fullscreen not possible." << std::endl;
+            free(error);
+        }
+        else
+            grabPointer();
     }
 
     free(stateReply);
