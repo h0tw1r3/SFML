@@ -572,6 +572,9 @@ void WindowImplX11::switchToFullscreen(const VideoMode& mode)
                 // Search a matching size
                 for (int i = 0; i < nbSizes; ++i)
                 {
+                    if (currentRotation == RR_Rotate_90 || currentRotation == RR_Rotate_270)
+                        std::swap(sizes[i].width, sizes[i].height);
+
                     if ((sizes[i].width == static_cast<int>(mode.width)) && (sizes[i].height == static_cast<int>(mode.height)))
                     {
                         // Switch to fullscreen mode

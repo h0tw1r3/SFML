@@ -57,6 +57,10 @@ std::vector<VideoMode> VideoModeImpl::getFullscreenModes()
             XRRScreenConfiguration* config = XRRGetScreenInfo(display, RootWindow(display, screen));
             if (config)
             {
+                // Get the current video rotation
+                Rotation currentRotation;
+                int currentMode = XRRConfigCurrentConfiguration(config, &currentRotation);
+
                 // Get the available screen sizes
                 int nbSizes;
                 XRRScreenSize* sizes = XRRConfigSizes(config, &nbSizes);
@@ -74,6 +78,9 @@ std::vector<VideoMode> VideoModeImpl::getFullscreenModes()
                             {
                                 // Convert to VideoMode
                                 VideoMode mode(sizes[j].width, sizes[j].height, depths[i]);
+
+                                if (currentRotation == RR_Rotate_90 || currentRotation == RR_Rotate_270)
+                                    std::swap(mode.width, mode.height);
 
                                 // Add it only if it is not already in the array
                                 if (std::find(modes.begin(), modes.end(), mode) == modes.end())
@@ -143,6 +150,9 @@ VideoMode VideoModeImpl::getDesktopMode()
                 XRRScreenSize* sizes = XRRConfigSizes(config, &nbSizes);
                 if (sizes && (nbSizes > 0))
                     desktopMode = VideoMode(sizes[currentMode].width, sizes[currentMode].height, DefaultDepth(display, screen));
+
+                    if (currentRotation == RR_Rotate_90 || currentRotation == RR_Rotate_270)
+                        std::swap(desktopMode.width, desktopMode.height);
 
                 // Free the configuration instance
                 XRRFreeScreenConfigInfo(config);
